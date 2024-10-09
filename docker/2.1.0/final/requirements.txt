@@ -1,0 +1,33 @@
+Flask==1.1.1  # sagemaker-containers requires flask 1.1.1
+PyYAML==6.0.2
+Pillow==9.1.1
+boto3==1.17.52
+botocore==1.20.112
+cryptography==39.0.1
+dask==2022.11.1
+dask-cuda==22.12.0
+gunicorn==19.10.0
+itsdangerous==2.0.1
+matplotlib==3.9.2
+multi-model-server==1.1.2
+numpy==1.24.1
+pandas==1.5.3  # Mudado para a versão compatível
+protobuf==3.20.1
+psutil==5.6.7  # sagemaker-containers requires psutil 5.6.7
+pynvml==11.4.1
+python-dateutil==2.9.0.post0
+retrying==1.3.3
+requests==2.29.0
+sagemaker-containers==2.8.6.post2
+sagemaker-inference==1.5.5
+scikit-learn==1.5.1
+scipy==1.8.0
+urllib3==1.26.5
+wheel==0.36.2
+jinja2==2.11.3
+MarkupSafe==1.1.1
+Werkzeug==0.15.6
+certifi==2023.7.22
+gevent==23.9.1
+typing  # Adicionado porque sagemaker-containers requer
+pyarrow==14.0.1  # Adicionado para compatibilidade com pandas e numpy
