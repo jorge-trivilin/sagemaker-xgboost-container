@@ -221,9 +221,15 @@ def predict(model, model_format, dtest, input_content_type, objective=None):
         else:
             raise ValueError("Content type {} is not supported".format(content_type))
 
+    # if isinstance(model, list): >>>>>>>>>>>> ntree_limit depreciado
+    #     ensemble = [
+    #         booster.predict(dtest, ntree_limit=getattr(booster, "best_ntree_limit", 0), validate_features=False)
+    #         for booster in model
+    #     ]
+
     if isinstance(model, list):
         ensemble = [
-            booster.predict(dtest, ntree_limit=getattr(booster, "best_ntree_limit", 0), validate_features=False)
+            booster.predict(dtest, iteration_range=(0, getattr(booster, "best_iteration", 0) + 1), validate_features=False)
             for booster in model
         ]
 
@@ -234,7 +240,8 @@ def predict(model, model_format, dtest, input_content_type, objective=None):
             logging.info(f"Average ensemble prediction of {objective} with {len(model)} models")
             return np.mean(ensemble, axis=0)
     else:
-        return model.predict(dtest, ntree_limit=getattr(model, "best_ntree_limit", 0), validate_features=False)
+        # return model.predict(dtest, ntree_limit=getattr(model, "best_ntree_limit", 0), validate_features=False)
+        return model.predict(dtest, iteration_range=(0, getattr(model, "best_iteration", 0) + 1), validate_features=False)
 
 
 def is_selectable_inference_output():
