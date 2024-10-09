@@ -13,7 +13,7 @@ def read(fname):
 
 setup(
     name="sagemaker_xgboost_container",
-    version="2.0",
+    version="2.1.0",  # Updated version number
     description="Open source library for creating XGBoost containers to run on Amazon SageMaker.",
     packages=find_packages(where="src", exclude=("test",)),
     package_dir={"": "src"},
@@ -30,8 +30,9 @@ setup(
         "Programming Language :: Python :: 3.6",
         "Programming Language :: Python :: 3.7",
         "Programming Language :: Python :: 3.8",
+        "Programming Language :: Python :: 3.9",  # Added Python 3.9 support
     ],
-    install_requires=read("requirements.txt"),
+    install_requires=[line.strip() for line in read("requirements.txt").splitlines() if line.strip()],
     extras_require={"test": read("test-requirements.txt")},
     entry_points={
         "console_scripts": [
