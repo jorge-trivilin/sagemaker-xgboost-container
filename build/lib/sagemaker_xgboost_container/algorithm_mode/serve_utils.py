@@ -221,7 +221,7 @@ def predict(model, model_format, dtest, input_content_type, objective=None):
         else:
             raise ValueError("Content type {} is not supported".format(content_type))
 
-    # if isinstance(model, list): >>>>>>>>>>>> ntree_limit depreciado
+    # if isinstance(model, list):
     #     ensemble = [
     #         booster.predict(dtest, ntree_limit=getattr(booster, "best_ntree_limit", 0), validate_features=False)
     #         for booster in model
