@@ -17,8 +17,8 @@ import pickle as pkl
 
 import numpy as np
 import xgboost as xgb
-from sagemaker_containers._recordio import _write_recordio
-from sagemaker_containers.record_pb2 import Record
+from sagemaker_containers._recordio import _write_recordio #type: ignore
+from sagemaker_containers.record_pb2 import Record #type: ignore
 from scipy import stats
 from scipy.sparse import csr_matrix
 
@@ -91,6 +91,7 @@ VALID_OBJECTIVES = {
 
 # FIXME: https://github.com/aws/sagemaker-xgboost-container/issues/12
 # This was failing a previous container test; need to make decision as to change test or behavior.
+
 def _get_sparse_matrix_from_libsvm(payload):
     pylist = map(lambda x: x.split(" "), payload.split("\n"))
     colon = ":"
@@ -113,7 +114,6 @@ def _get_sparse_matrix_from_libsvm(payload):
         raise RuntimeError("Dimension checking failed when transforming sparse matrix.")
 
     return csr_matrix((data, (row, col)))
-
 
 def parse_content_data(input_data, input_content_type):
     dtest = None
@@ -151,7 +151,6 @@ def parse_content_data(input_data, input_content_type):
 
     return dtest, content_type
 
-
 def _get_full_model_paths(model_dir):
     for data_file in os.listdir(model_dir):
         full_model_path = os.path.join(model_dir, data_file)
@@ -163,7 +162,6 @@ def _get_full_model_paths(model_dir):
                 )
             else:
                 yield full_model_path
-
 
 def get_loaded_booster(model_dir, ensemble=False):
     full_model_paths = list(_get_full_model_paths(model_dir))
@@ -187,66 +185,118 @@ def get_loaded_booster(model_dir, ensemble=False):
                     f"\nPickle load error={str(exp_pkl)}"
                     f"\nXGB load model error={str(exp_xgb)}"
                 )
-        booster.set_param("nthread", 1)
+        booster.set_param("nthread", "1")
         models.append(booster)
         model_formats.append(model_format)
 
     return (models, model_formats) if ensemble and len(models) > 1 else (models[0], model_formats[0])
 
+def get_iteration_range(booster, num_boost_round):
+    """
+    Determina o intervalo de iterações a ser usado para a predição.
 
-def predict(model, model_format, dtest, input_content_type, objective=None):
-    bst, bst_format = (model[0], model_format[0]) if type(model) is list else (model, model_format)
+    Parameters:
+    - booster: xgb.Booster - O objeto Booster do XGBoost.
+    - num_boost_round: int - O número total de rodadas de boosting definidas no treinamento.
 
-    if bst_format == PKL_FORMAT:
-        x = bst.num_features()
-        y = len(dtest.feature_names) if dtest.feature_names is not None else dtest.num_col()
+    Returns:
+    - Tuple[int, int] - O intervalo de iterações a ser usado.
+    """
+    best_iteration = getattr(booster, "best_iteration", 0)
+    if best_iteration and best_iteration > 0:
+        # Use árvores até a melhor iteração (exclusive)
+        logging.info(f"Usando iteration_range (0, {best_iteration}) com base no best_iteration.")
+        return (0, best_iteration)
+    else:
+        # Use todas as árvores disponíveis
+        num_trees = booster.num_boosters()
+        logging.info(f"Usando iteration_range (0, {num_trees}) com base no total de boosters.")
+        return (0, num_trees)
 
-        try:
-            content_type = get_content_type(input_content_type)
-        except Exception:
-            raise ValueError("Content type {} is not supported".format(input_content_type))
+def predict(model, model_format, dtest, input_content_type, objective=None, num_boost_round=100):
+    """
+    Realiza a predição utilizando o modelo treinado.
 
-        if content_type == LIBSVM:
-            if y > x + 1:
-                raise ValueError(
-                    "Feature size of libsvm inference data {} is larger than "
-                    "feature size of trained model {}.".format(y, x)
-                )
-        elif content_type in [CSV, RECORDIO_PROTOBUF]:
-            if not ((x == y) or (x == y + 1)):
-                raise ValueError(
-                    "Feature size of {} inference data {} is not consistent "
-                    "with feature size of trained model {}.".format(content_type, y, x)
-                )
-        else:
-            raise ValueError("Content type {} is not supported".format(content_type))
+    Parameters:
+    - model: xgb.Booster ou List[xgb.Booster] - O modelo treinado.
+    - model_format: str ou List[str] - O formato do modelo (não utilizado diretamente aqui).
+    - dtest: xgb.DMatrix - O DMatrix contendo os dados de teste.
+    - input_content_type: str - O tipo de conteúdo dos dados de entrada.
+    - objective: str - O objetivo de treinamento do modelo (ex: 'binary:logistic').
+    - num_boost_round: int - O número total de rodadas de boosting definidas no treinamento.
 
-    # if isinstance(model, list):
-    #     ensemble = [
-    #         booster.predict(dtest, ntree_limit=getattr(booster, "best_ntree_limit", 0), validate_features=False)
-    #         for booster in model
-    #     ]
+    Returns:
+    - np.ndarray - As predições realizadas pelo modelo.
+    """
+    bst, bst_format = (model[0], model_format[0]) if isinstance(model, list) else (model, model_format)
 
     if isinstance(model, list):
         ensemble = [
-            booster.predict(dtest, iteration_range=(0, getattr(booster, "best_iteration", 0) + 1), validate_features=False)
+            booster.predict(dtest, iteration_range=get_iteration_range(booster, num_boost_round), validate_features=False)
             for booster in model
         ]
 
         if objective in [MULTI_SOFTMAX, BINARY_HINGE]:
-            logging.info(f"Vote ensemble prediction of {objective} with {len(model)} models")
+            logging.info(f"Votação ensemble para predição de {objective} com {len(model)} modelos.")
             return stats.mode(ensemble).mode[0]
         else:
-            logging.info(f"Average ensemble prediction of {objective} with {len(model)} models")
+            logging.info(f"Média ensemble para predição de {objective} com {len(model)} modelos.")
             return np.mean(ensemble, axis=0)
     else:
-        # return model.predict(dtest, ntree_limit=getattr(model, "best_ntree_limit", 0), validate_features=False)
-        return model.predict(dtest, iteration_range=(0, getattr(model, "best_iteration", 0) + 1), validate_features=False)
+        prediction = model.predict(dtest, iteration_range=get_iteration_range(model, num_boost_round), validate_features=False)
+        return prediction
 
+# def predict(model, model_format, dtest, input_content_type, objective=None):
+#     bst, bst_format = (model[0], model_format[0]) if type(model) is list else (model, model_format)
+
+#     if bst_format == PKL_FORMAT:
+#         x = bst.num_features()
+#         y = len(dtest.feature_names) if dtest.feature_names is not None else dtest.num_col()
+
+#         try:
+#             content_type = get_content_type(input_content_type)
+#         except Exception:
+#             raise ValueError("Content type {} is not supported".format(input_content_type))
+
+#         if content_type == LIBSVM:
+#             if y > x + 1:
+#                 raise ValueError(
+#                     "Feature size of libsvm inference data {} is larger than "
+#                     "feature size of trained model {}.".format(y, x)
+#                 )
+#         elif content_type in [CSV, RECORDIO_PROTOBUF]:
+#             if not ((x == y) or (x == y + 1)):
+#                 raise ValueError(
+#                     "Feature size of {} inference data {} is not consistent "
+#                     "with feature size of trained model {}.".format(content_type, y, x)
+#                 )
+#         else:
+#             raise ValueError("Content type {} is not supported".format(content_type))
+
+#     # if isinstance(model, list):
+#     #     ensemble = [
+#     #         booster.predict(dtest, ntree_limit=getattr(booster, "best_ntree_limit", 0), validate_features=False)
+#     #         for booster in model
+#     #     ]
+
+#     if isinstance(model, list):
+#         ensemble = [
+#             booster.predict(dtest, iteration_range=(0, getattr(booster, "best_iteration", 0) + 1), validate_features=False)
+#             for booster in model
+#         ]
+
+#         if objective in [MULTI_SOFTMAX, BINARY_HINGE]:
+#             logging.info(f"Vote ensemble prediction of {objective} with {len(model)} models")
+#             return stats.mode(ensemble).mode[0]
+#         else:
+#             logging.info(f"Average ensemble prediction of {objective} with {len(model)} models")
+#             return np.mean(ensemble, axis=0)
+#     else:
+#         # return model.predict(dtest, ntree_limit=getattr(model, "best_ntree_limit", 0), validate_features=False)
+#         return model.predict(dtest, iteration_range=(0, getattr(model, "best_iteration", 0) + 1), validate_features=False)
 
 def is_selectable_inference_output():
     return sm_env_constants.SAGEMAKER_INFERENCE_OUTPUT in os.environ
-
 
 def get_selected_output_keys():
     """Get the selected output content keys from the `SAGEMAKER_INFERENCE_OUTPUT` env var.
@@ -254,12 +304,14 @@ def get_selected_output_keys():
     :return: selected output content keys (list of str)
     """
     if is_selectable_inference_output():
+        if SAGEMAKER_INFERENCE_OUTPUT is None:
+            raise RuntimeError("Environment variable 'SAGEMAKER_INFERENCE_OUTPUT' is not set.")
         return SAGEMAKER_INFERENCE_OUTPUT.replace(" ", "").lower().split(",")
+    
     raise RuntimeError(
         "'SAGEMAKER_INFERENCE_OUTPUT' environment variable is not present. "
         "Selectable inference content is not enabled."
     )
-
 
 def _get_labels(objective, num_class=""):
     """Get the labels for a classification problem.
@@ -276,7 +328,6 @@ def _get_labels(objective, num_class=""):
     if "multi:" in objective and num_class:
         return list(range(int(num_class)))
     return np.nan
-
 
 def _get_predicted_label(objective, raw_prediction):
     """Get the predicted label for a classification problem.
@@ -295,7 +346,6 @@ def _get_predicted_label(objective, raw_prediction):
         return np.argmax(raw_prediction).item()
     return np.nan
 
-
 def _get_probability(objective, raw_prediction):
     """Get the probability score for a classification problem.
 
@@ -313,7 +363,6 @@ def _get_probability(objective, raw_prediction):
         return raw_prediction.item()
     return np.nan
 
-
 def _get_probabilities(objective, raw_prediction):
     """Get the probability scores for all classes for a classification problem.
 
@@ -328,7 +377,6 @@ def _get_probabilities(objective, raw_prediction):
         classzero_probs = 1.0 - classone_probs
         return [classzero_probs, classone_probs]
     return np.nan
-
 
 def _get_raw_score(objective, raw_prediction):
     """Get the raw score for a classification problem.
@@ -350,7 +398,6 @@ def _get_raw_score(objective, raw_prediction):
     if objective in [BINARY_LOGRAW, BINARY_HINGE, BINARY_LOG, MULTI_SOFTMAX]:
         return raw_prediction.item()
     return np.nan
-
 
 def _get_raw_scores(objective, raw_prediction):
     """Get the raw scores for all classes for a classification problem.
@@ -374,7 +421,6 @@ def _get_raw_scores(objective, raw_prediction):
         classzero_probs = 1.0 - classone_probs
         return [classzero_probs, classone_probs]
     return np.nan
-
 
 def get_selected_predictions(raw_predictions, selected_keys, objective, num_class=""):
     """Build the selected prediction dictionary based on the objective function and
@@ -431,7 +477,6 @@ def get_selected_predictions(raw_predictions, selected_keys, objective, num_clas
         predictions.append(output)
     return predictions
 
-
 def _encode_selected_predictions_csv(predictions, ordered_keys_list):
     """Encode predictions in csv format.
 
@@ -461,10 +506,8 @@ def _encode_selected_predictions_csv(predictions, ordered_keys_list):
 
     return "\n".join(_generate_single_csv_line_selected_prediction(predictions, ordered_keys_list))
 
-
 def _write_record(record, key, value):
     record.label[key].float32_tensor.values.extend(value)
-
 
 def _encode_selected_predictions_recordio_protobuf(predictions):
     """Encode predictions in recordio-protobuf format.
@@ -487,7 +530,6 @@ def _encode_selected_predictions_recordio_protobuf(predictions):
         record.Clear()
         _write_recordio(recordio_bio, record_bio.getvalue())
     return recordio_bio.getvalue()
-
 
 def encode_selected_predictions(predictions, selected_content_keys, accept):
     """Encode the selected predictions and keys based on the given accept type.
@@ -514,7 +556,6 @@ def encode_selected_predictions(predictions, selected_content_keys, accept):
         return csv_response
     raise RuntimeError("Cannot encode selected predictions into accept type '{}'.".format(accept))
 
-
 def encode_predictions_as_json(predictions):
     """Encode the selected predictions based on the JSON output format expected.
         See https://docs.aws.amazon.com/sagemaker/latest/dg/cdf-inference.html
@@ -528,7 +569,6 @@ def encode_predictions_as_json(predictions):
     for pred in predictions:
         preds_list_of_dict.append({SCORE_OUT_KEY: pred})
     return json.dumps({TOP_LEVEL_OUT_KEY: preds_list_of_dict})
-
 
 def is_ensemble_enabled():
     return os.environ.get(SAGEMAKER_INFERENCE_ENSEMBLE, "true") == "true"

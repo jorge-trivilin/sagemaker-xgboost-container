@@ -12,6 +12,7 @@
 # language governing permissions and limitations under the License.
 import logging
 import logging.config
+import sys
 
 FORMATTERS = {
     "verbose": {
@@ -49,4 +50,8 @@ def setup_main_logger(name):
 
     log_config = LOGGING_CONFIGS["console_only"]
     logging.config.dictConfig(log_config)
+
+    # Adicione esta linha para propagar para o CloudWatch:
+    logging.getLogger().addHandler(logging.StreamHandler(sys.stderr))
+
     return logging.getLogger(name)
